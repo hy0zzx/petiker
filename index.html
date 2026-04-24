@@ -182,26 +182,25 @@ function isInCharArea(x, y) {
          y >= charRect.y && y <= charRect.y + charRect.h;
 }
 
+function detectMovement() {
+  if (!isMouseDown || gameState !== STATE.PLAY) return;
+  const dx = mouse.x - lastMouseX;
+  const dy = mouse.y - lastMouseY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist >= MOVE_THRESHOLD && isInCharArea(mouse.x, mouse.y)) {
+    lastMoveTime = performance.now();
+  }
+  lastMouseX = mouse.x;
+  lastMouseY = mouse.y;
+}
+
 function handleMouseMove(e) {
-  if (e._touch) return; // 터치는 getTouchPos에서 이미 처리
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   mouse.x = (e.clientX - rect.left) * scaleX;
   mouse.y = (e.clientY - rect.top) * scaleY;
-
-  if (!isMouseDown || gameState !== STATE.PLAY) return;
-
-  const dx = mouse.x - lastMouseX;
-  const dy = mouse.y - lastMouseY;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist >= MOVE_THRESHOLD && isInCharArea(mouse.x, mouse.y)) {
-    lastMoveTime = performance.now();
-  }
-
-  lastMouseX = mouse.x;
-  lastMouseY = mouse.y;
+  detectMovement();
 }
 
 function handleMouseDown(e) {
@@ -254,7 +253,7 @@ canvas.addEventListener('touchmove', e => {
   e.preventDefault();
   const pos = getTouchPos(e);
   mouse.x = pos.x; mouse.y = pos.y;
-  handleMouseMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, _touch: true });
+  detectMovement();
 }, { passive: false });
 
 canvas.addEventListener('touchend', e => {
