@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>대상혁 쓰다듬기</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      cursor: none;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// 9:16 모바일 비율
+canvas.width = 390;
+canvas.height = 693;
+
+// --- 이미지 로드 ---
+const IMG = {};
+const imageSources = {
+  back:  'public/png/faker-back.png',
+  front: 'public/png/faker-front.png',
+  angry: 'public/png/faker-angry.png',
+  hand:  'public/png/hand.png',
+};
+let loadedCount = 0;
+const totalImages = Object.keys(imageSources).length;
+
+function loadImages(cb) {
+  for (const [key, src] of Object.entries(imageSources)) {
+    const img = new Image();
+    img.onload = () => { loadedCount++; if (loadedCount === totalImages) cb(); };
+    img.onerror = () => { loadedCount++; if (loadedCount === totalImages) cb(); };
+    img.src = src;
+    IMG[key] = img;
+  }
+}
+
+// --- 게임 상태 ---
+const STATE = { START: 'start', PLAY: 'play', OVER: 'over' };
+let gameState = STATE.START;
+
+// 페이커 모드
+const MODE = { BACK: 'back', FRONT: 'front' };
+let fakerMode = MODE.BACK;
+
+// 캐릭터 영역 — 이미지 로드 후 비율 계산
+let charRect  = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+let angryRect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+
+function computeCharRect() {
+  const img = IMG.back;
+  if (!img.naturalWidth) return;
+  const h = Math.round(canvas.width * img.naturalHeight / img.naturalWidth);
+  charRect = { x: 0, y: canvas.height - h, w: canvas.width, h };
+}
+
+function computeAngryRect() {
+  const img = IMG.angry;
+  if (!img.naturalWidth) return;
+  // 세로 기준으로 캔버스 꽉 채우고, 가로는 중앙 정렬 (좌우 클리핑)
+  const h = canvas.height;
+  const w = Math.round(h * img.naturalWidth / img.naturalHeight);
+  const x = Math.round((canvas.width - w) / 2);
+  angryRect = { x, y: 0, w, h };
+}
+
+// 점수 & 쓰다듬 카운트
+let score = 0;
+const PET_INTERVAL = 300; // ms
+
+// 마우스
+let mouse = { x: 0, y: 0 };
+let isMouseDown = false;
+let lastMoveTime = 0;
+let petTimer = 0;
+let lastMouseX = 0;
+let lastMouseY = 0;
+const MOVE_THRESHOLD = 3; // px - 움직임 감지 최소 거리
+
+// 인지 모드 타이밍 (ms)
+let modeTimer = 0;
+let modeDuration = 0;
+let frontGrace = 0; // FRONT 진입 직후 유예 시간
+
+function getFrontGrace(elapsed) {
+  if (elapsed < 20000) return 500;
+  if (elapsed < 45000) return 400;
+  return 300;
+}
+
+// 게임 오버 애니메이션
+let angryAlpha = 0;
+
+// 화면 흔들림
+let shakeFrames = 0;
+let shakeX = 0;
+let shakeY = 0;
+
+// 쓰다듬 파티클
+let particles = [];
+
+// 타임스탬프
+let lastTime = 0;
+
+// --- 모드 지속 시간 설정 ---
+function getModeDuration(mode, elapsed) {
+  if (mode === MODE.BACK) {
+    // 안전 구간: 초반 길게, 갈수록 짧아짐
+    if (elapsed < 20000) return 3000 + Math.random() * 2000;  // 3~5초
+    if (elapsed < 45000) return 2000 + Math.random() * 1500;  // 2~3.5초
+    return 1000 + Math.random() * 1000;                        // 1~2초
+  } else {
+    // 인지 모드: 초반 짧게(여유), 갈수록 길어짐
+    if (elapsed < 20000) return 1500 + Math.random() * 1000;  // 1.5~2.5초
+    if (elapsed < 45000) return 2000 + Math.random() * 1500;  // 2~3.5초
+    return 3000 + Math.random() * 2000;                        // 3~5초
+  }
+}
+
+let gameElapsed = 0;
+
+function switchMode() {
+  fakerMode = fakerMode === MODE.BACK ? MODE.FRONT : MODE.BACK;
+  modeDuration = getModeDuration(fakerMode, gameElapsed);
+  modeTimer = 0;
+  frontGrace = fakerMode === MODE.FRONT ? getFrontGrace(gameElapsed) : 0;
+}
+
+// --- 파티클 ---
+function spawnParticle() {
+  particles.push({
+    x: mouse.x + (Math.random() - 0.5) * 40,
+    y: mouse.y + (Math.random() - 0.5) * 40,
+    vx: (Math.random() - 0.5) * 2,
+    vy: -1 - Math.random() * 2,
+    life: 1.0,
+    size: 6 + Math.random() * 8,
+    text: ['♡', '✨', '💕'][Math.floor(Math.random() * 3)],
+  });
+}
+
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= dt / 800;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.font = `${p.size}px serif`;
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- 마우스 이동 감지 (쓰다듬 로직) ---
+function isInCharArea(x, y) {
+  return x >= charRect.x && x <= charRect.x + charRect.w &&
+         y >= charRect.y && y <= charRect.y + charRect.h;
+}
+
+function handleMouseMove(e) {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+
+  if (!isMouseDown || gameState !== STATE.PLAY) return;
+
+  const dx = mouse.x - lastMouseX;
+  const dy = mouse.y - lastMouseY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist >= MOVE_THRESHOLD && isInCharArea(mouse.x, mouse.y)) {
+    lastMoveTime = performance.now();
+  }
+
+  lastMouseX = mouse.x;
+  lastMouseY = mouse.y;
+}
+
+function handleMouseDown(e) {
+  if (e.button !== 0) return;
+
+  if (gameState === STATE.OVER) {
+    resetGame();
+    return;
+  }
+
+  isMouseDown = true;
+  lastMouseX = mouse.x;
+  lastMouseY = mouse.y;
+  lastMoveTime = performance.now();
+
+  if (fakerMode === MODE.FRONT && frontGrace <= 0 && isInCharArea(mouse.x, mouse.y)) {
+    triggerGameOver();
+  }
+}
+
+function handleMouseUp(e) {
+  if (e.button !== 0) return;
+  isMouseDown = false;
+  petTimer = 0;
+}
+
+canvas.addEventListener('mousemove', handleMouseMove);
+canvas.addEventListener('mousedown', handleMouseDown);
+canvas.addEventListener('mouseup', handleMouseUp);
+
+// --- 게임 시작 / 리셋 ---
+function startGame() {
+  gameState = STATE.PLAY;
+  score = 0;
+  fakerMode = MODE.BACK;
+  modeTimer = 0;
+  modeDuration = getModeDuration(MODE.BACK, 0);
+  gameElapsed = 0;
+  particles = [];
+  angryAlpha = 0;
+  shakeFrames = 0;
+  petTimer = 0;
+  frontGrace = 0;
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function resetGame() {
+  isMouseDown = false;
+  startGame();
+}
+
+function triggerGameOver() {
+  gameState = STATE.OVER;
+  isMouseDown = false;
+  shakeFrames = 30;
+  angryAlpha = 0;
+}
+
+// --- 메인 루프 ---
+function loop(ts) {
+  if (gameState !== STATE.PLAY && gameState !== STATE.OVER) return;
+
+  const dt = ts - lastTime;
+  lastTime = ts;
+
+  if (gameState === STATE.PLAY) {
+    gameElapsed += dt;
+    modeTimer += dt;
+    if (modeTimer >= modeDuration) switchMode();
+
+    // 쓰다듬 카운트
+    const now = performance.now();
+    const isMoving = (now - lastMoveTime) < 150;
+
+    if (frontGrace > 0) frontGrace -= dt;
+
+    if (isMouseDown && isMoving && isInCharArea(mouse.x, mouse.y)) {
+      if (fakerMode === MODE.FRONT && frontGrace <= 0) {
+        triggerGameOver();
+      } else if (fakerMode === MODE.BACK) {
+        petTimer += dt;
+        if (petTimer >= PET_INTERVAL) {
+          score++;
+          petTimer -= PET_INTERVAL;
+          spawnParticle();
+        }
+        if (Math.random() < 0.15) spawnParticle();
+      }
+    } else {
+      petTimer = 0;
+    }
+
+    updateParticles(dt);
+  }
+
+  if (gameState === STATE.OVER) {
+    angryAlpha = Math.min(1, angryAlpha + 0.05);
+    if (shakeFrames > 0) {
+      shakeX = (Math.random() - 0.5) * 12;
+      shakeY = (Math.random() - 0.5) * 12;
+      shakeFrames--;
+    } else {
+      shakeX = 0; shakeY = 0;
+    }
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// --- 그리기 ---
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (gameState === STATE.PLAY) {
+    drawPlay();
+  } else if (gameState === STATE.OVER) {
+    drawOver();
+  }
+
+  drawCursor();
+}
+
+
+function drawPlay() {
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  const img = fakerMode === MODE.BACK ? IMG.back : IMG.front;
+  ctx.drawImage(img, charRect.x, charRect.y, charRect.w, charRect.h);
+
+  drawParticles();
+
+  // 점수
+  ctx.fillStyle = '#222';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${score}`, 20, 42);
+
+  ctx.restore();
+}
+
+function drawOver() {
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+  ctx.globalAlpha = angryAlpha;
+  ctx.drawImage(IMG.angry, angryRect.x, angryRect.y, angryRect.w, angryRect.h);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  if (angryAlpha > 0.8) {
+    const a = Math.min(1, (angryAlpha - 0.8) * 5);
+    ctx.fillStyle = `rgba(0,0,0,${a * 0.6})`;
+    ctx.fillRect(0, canvas.height - 140, canvas.width, 140);
+
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`쓰다듬 ${score}회 만에 들킴`, canvas.width / 2, canvas.height - 80);
+
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = `rgba(200,200,200,${a})`;
+    ctx.fillText('클릭하면 다시 시작', canvas.width / 2, canvas.height - 45);
+  }
+}
+
+function drawCursor() {
+  const size = 144;
+  ctx.drawImage(IMG.hand, mouse.x - size / 2, mouse.y - size / 2, size, size);
+}
+
+// --- 시작 화면 렌더 (루프 전) ---
+function drawStatic() {
+  draw();
+  if (gameState === STATE.START) requestAnimationFrame(drawStatic);
+}
+
+// --- 초기 로드 ---
+loadImages(() => {
+  computeCharRect();
+  computeAngryRect();
+  startGame();
+});
+</script>
+</body>
+</html>
