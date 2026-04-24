@@ -2,11 +2,12 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>대상혁 쓰다듬기</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #fff;
+      background: #000;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -14,7 +15,12 @@
       overflow: hidden;
       cursor: none;
     }
-    canvas { display: block; }
+    canvas {
+      display: block;
+      width: min(100vw, calc(100vh * 9 / 16));
+      height: min(100vh, calc(100vw * 16 / 9));
+      touch-action: none;
+    }
   </style>
 </head>
 <body>
@@ -177,9 +183,12 @@ function isInCharArea(x, y) {
 }
 
 function handleMouseMove(e) {
+  if (e._touch) return; // 터치는 getTouchPos에서 이미 처리
   const rect = canvas.getBoundingClientRect();
-  mouse.x = e.clientX - rect.left;
-  mouse.y = e.clientY - rect.top;
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  mouse.x = (e.clientX - rect.left) * scaleX;
+  mouse.y = (e.clientY - rect.top) * scaleY;
 
   if (!isMouseDown || gameState !== STATE.PLAY) return;
 
@@ -222,6 +231,36 @@ function handleMouseUp(e) {
 canvas.addEventListener('mousemove', handleMouseMove);
 canvas.addEventListener('mousedown', handleMouseDown);
 canvas.addEventListener('mouseup', handleMouseUp);
+
+function getTouchPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0] || e.changedTouches[0];
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (t.clientX - rect.left) * scaleX,
+    y: (t.clientY - rect.top) * scaleY,
+  };
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const pos = getTouchPos(e);
+  mouse.x = pos.x; mouse.y = pos.y;
+  handleMouseDown({ button: 0 });
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const pos = getTouchPos(e);
+  mouse.x = pos.x; mouse.y = pos.y;
+  handleMouseMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, _touch: true });
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  handleMouseUp({ button: 0 });
+}, { passive: false });
 
 // --- 게임 시작 / 리셋 ---
 function startGame() {
@@ -346,19 +385,33 @@ function drawOver() {
   ctx.globalAlpha = 1;
   ctx.restore();
 
-  if (angryAlpha > 0.8) {
-    const a = Math.min(1, (angryAlpha - 0.8) * 5);
-    ctx.fillStyle = `rgba(0,0,0,${a * 0.6})`;
-    ctx.fillRect(0, canvas.height - 140, canvas.width, 140);
+  if (angryAlpha > 0.7) {
+    const a = Math.min(1, (angryAlpha - 0.7) * 3.5);
+    const scale = 0.7 + 0.3 * a;
 
-    ctx.fillStyle = `rgba(255,255,255,${a})`;
-    ctx.font = 'bold 24px sans-serif';
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(canvas.width / 2, canvas.height / 2 - 40);
+    ctx.scale(scale, scale);
+    // 메인 멘트
     ctx.textAlign = 'center';
-    ctx.fillText(`쓰다듬 ${score}회 만에 들킴`, canvas.width / 2, canvas.height - 80);
+    ctx.font = 'bold 42px sans-serif';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineJoin = 'round';
+    ctx.strokeText(`쓰다듬 ${score}회 만에 들킴`, 0, 0);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`쓰다듬 ${score}회 만에 들킴`, 0, 0);
 
-    ctx.font = '15px sans-serif';
-    ctx.fillStyle = `rgba(200,200,200,${a})`;
-    ctx.fillText('클릭하면 다시 시작', canvas.width / 2, canvas.height - 45);
+    // 서브 멘트
+    ctx.font = 'bold 18px sans-serif';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText('클릭해서 다시 쓰다듬기', 0, 46);
+    ctx.fillStyle = '#ffe066';
+    ctx.fillText('클릭해서 다시 쓰다듬기', 0, 46);
+
+    ctx.restore();
   }
 }
 
