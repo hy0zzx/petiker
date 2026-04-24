@@ -415,6 +415,7 @@ function drawOver() {
 }
 
 function drawCursor() {
+  if (gameState === STATE.OVER) return;
   const size = 144;
   ctx.drawImage(IMG.hand, mouse.x - size / 2, mouse.y - size / 2, size, size);
 }
